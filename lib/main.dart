@@ -1,11 +1,21 @@
-import 'package:chyawanprash/data/api_helper.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
+import 'package:provider/provider.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+import 'Provider/api_OutPut.dart';
+import 'Provider/MessageModel.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ChatProvider()),
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -26,16 +36,31 @@ class Assistant extends StatefulWidget {
   @override
   State<Assistant> createState() => _AssistantState();
 }
-var inputText=TextEditingController();
+
+var inputText = TextEditingController();
+
 class _AssistantState extends State<Assistant> {
   final SpeechToText speechToTextInstance = SpeechToText();
+  final FlutterTts flutterTts = FlutterTts();
   String recordedText = "";
   bool isLoading = false;
-  String resultText = ""; // Add this line to store the result from API
+
+  @override
+  void initState() {
+    super.initState();
+    initializeSpeechToText();
+    initializeTextToSpeech();
+  }
 
   initializeSpeechToText() async {
     await speechToTextInstance.initialize();
-    setState(() {});
+  }
+
+  initializeTextToSpeech() {
+    flutterTts.setLanguage('en-US');
+    flutterTts.setPitch(1.0);
+    flutterTts.setSpeechRate(0.5);
+    flutterTts.setVolume(1.0);
   }
 
   startListeningNow() async {
@@ -51,7 +76,6 @@ class _AssistantState extends State<Assistant> {
     setState(() {
       isLoading = false;
     });
-
   }
 
   void onSpeechToTextResult(SpeechRecognitionResult recognitionResult) {
@@ -59,17 +83,23 @@ class _AssistantState extends State<Assistant> {
       recordedText = recognitionResult.recognizedWords;
       print(recordedText);
     });
+
+    if (recognitionResult.finalResult) {
+      // Automatically send the message when recognition is complete
+      Provider.of<ChatProvider>(context, listen: false).sendMsg(prompt: recordedText);
+      recordedText = ""; // Clear recorded text after sending
+    }
   }
 
-  @override
-  void initState() {
-    super.initState();
-    initializeSpeechToText();
+  // Define the speak method
+  Future<void> speak(String text) async {
+    await flutterTts.speak(text);
   }
 
   @override
   Widget build(BuildContext context) {
-    // String result=output.toString();
+    final chatProvider = Provider.of<ChatProvider>(context);
+
     return Scaffold(
       appBar: AppBar(
         flexibleSpace: Container(
@@ -114,32 +144,26 @@ class _AssistantState extends State<Assistant> {
               padding: const EdgeInsets.all(15.0),
               child: Container(
                 height: 180,
-                child: InkWell (
-                  onTap: () async{
+                child: InkWell(
+                  onTap: () async {
                     speechToTextInstance.isListening
                         ? stopListeningNow()
                         : startListeningNow();
-                    // Make API call after stopping listening
-                    var result = await ApiHelper().generateAiMsg(prompt: recordedText);
-                    setState(() {
-                      resultText = result!;
-                    });
                   },
                   child: speechToTextInstance.isListening
                       ? Padding(
-                        padding: const EdgeInsets.all(50.0),
-                        child: Center(
-
-                         child: LoadingAnimationWidget.staggeredDotsWave(
+                    padding: const EdgeInsets.all(50.0),
+                    child: Center(
+                      child: LoadingAnimationWidget.staggeredDotsWave(
                         color: speechToTextInstance.isListening
                             ? Colors.cyan
                             : isLoading
                             ? Colors.lightBlue
                             : Colors.blueAccent,
                         size: 300,
-                                            ),
-                                          ),
-                      )
+                      ),
+                    ),
+                  )
                       : Image.asset(
                     "assets/images/mic.jpg",
                   ),
@@ -147,14 +171,14 @@ class _AssistantState extends State<Assistant> {
               ),
             ),
             Padding(
-              padding:  const EdgeInsets.all(8.0),
+              padding: const EdgeInsets.all(8.0),
               child: Row(
                 children: [
-                   Expanded(
+                  Expanded(
                     child: TextField(
                       controller: inputText,
                       decoration: const InputDecoration(
-                        hintText: 'how can i help you ?',
+                        hintText: 'How can I help you?',
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -162,13 +186,7 @@ class _AssistantState extends State<Assistant> {
                   const SizedBox(width: 8),
                   InkWell(
                     onTap: () async {
-
-                       var result= await ApiHelper().generateAiMsg(prompt: inputText.text);
-
-                      setState(() {
-                         resultText =  result!;
-                      });
-
+                      chatProvider.sendMsg(prompt: inputText.text);
                       inputText.clear();
                     },
                     child: const Icon(Icons.send, size: 30),
@@ -176,21 +194,60 @@ class _AssistantState extends State<Assistant> {
                 ],
               ),
             ),
-
             Container(
-              decoration: BoxDecoration(
-                border:Border.all(color: Colors.lightBlueAccent),
+              decoration: const BoxDecoration(
+                borderRadius: BorderRadius.all(
+                  Radius.circular(8),
+                ),
+                color: Colors.lightBlueAccent,
               ),
-              child:  Text(
-
-                resultText,
+              height: 450, // Added height to make ListView.builder scrollable
+              child: ListView.builder(
+                reverse: true,
+                itemBuilder: (context, index) {
+                  final message = chatProvider.listMsgs[index];
+                  return Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Align(
+                      alignment: message.senderId == 0
+                          ? Alignment.centerRight
+                          : Alignment.centerLeft,
+                      child: Container(
+                        padding: const EdgeInsets.all(12.0),
+                        decoration: BoxDecoration(
+                          color: message.senderId == 0
+                              ? Colors.blue[200]
+                              : Colors.grey[200],
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
+                        child: Text(message.msg),
+                      ),
+                    ),
+                  );
+                },
+                itemCount: chatProvider.listMsgs.length,
               ),
-            )
+            ),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {},
+        onPressed: () async {
+          if (chatProvider.listMsgs.isNotEmpty) {
+            final lastAIMessage = chatProvider.listMsgs.lastWhere(
+                  (msg) => msg.senderId == 1,
+              orElse: () => MessageModel(msg: '', senderId: -1), // Default empty message
+            );
+            if (lastAIMessage.senderId == 1) {
+              print("Last AI message: ${lastAIMessage.msg}"); // Debug print
+              await speak(lastAIMessage.msg);
+            } else {
+              print("No AI message found."); // Debug print
+            }
+          } else {
+            print("Message list is empty."); // Debug print
+          }
+        },
         child: Image.asset('assets/images/speaker.png'),
       ),
     );
